@@ -1,15 +1,16 @@
 package com.example.nabil.simpletodo;
 
+import androidx.annotation.Nullable;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
+
 import android.content.Intent;
-import android.support.annotation.Nullable;
-import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
-import android.widget.AdapterView;
-import android.widget.ArrayAdapter;
+import android.widget.Button;
 import android.widget.EditText;
-import android.widget.ListView;
 import android.widget.Toast;
 
 import org.apache.commons.io.FileUtils;
@@ -18,116 +19,120 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.charset.Charset;
 import java.util.ArrayList;
+import java.util.List;
 
 public class MainActivity extends AppCompatActivity {
 
-    // A numeric code to identify the edit activity
-    public final static int EDIT_REQUEST_CODE = 20;
-    // Key used for passing data between activities
-    public final static String ITEM_TEXT = "itemText";
-    public final static String ITEM_POSITION = "itemPosition";
+    public static final String KEY_ITEM_TEXT = "item_text";
+    public static final String KEY_ITEM_POSITION = "item_position";
+    public static final int EDIT_TEXT_CODE = 20;
 
-    ArrayList<String> items;
-    ArrayAdapter<String> itemsAdapter;
-    ListView lvItems;
+    private List<String> items;
+    private Button btnAdd;
+    private EditText etItems;
+    private RecyclerView rvItems;
+    private ItemsAdapter itemsAdapter;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        readItems(); //items = new ArrayList<>();
-        itemsAdapter = new ArrayAdapter<String>(this, android.R.layout.simple_expandable_list_item_1, items);
-        lvItems = (ListView) findViewById(R.id.lvItems);
-        lvItems.setAdapter(itemsAdapter);
+        btnAdd = (Button) findViewById(R.id.btnAdd);
+        etItems = (EditText) findViewById(R.id.etItem);
+        rvItems = (RecyclerView) findViewById(R.id.rvItems);
 
-        // mock data
-        //items.add("First Item");
-        //items.add("Second Item");
+        loadItems();    // load the items
 
-        setupListViewListener();
-    }
-
-    public void onAddItem(View v) {
-        EditText etNewItem = (EditText) findViewById(R.id.etNewItem);
-        String itemText = etNewItem.getText().toString();
-        itemsAdapter.add(itemText);
-        etNewItem.setText("");
-        writeItems();
-        Toast.makeText(getApplicationContext(), "Item added to list", Toast.LENGTH_SHORT).show();
-    }
-
-    private void setupListViewListener() {
-        Log.i("MainActivity", "Setting up listener on list view");
-        lvItems.setOnItemLongClickListener(new AdapterView.OnItemLongClickListener() {
-
+        ItemsAdapter.OnClickListener onClickListener = new ItemsAdapter.OnClickListener() {
             @Override
-            public boolean onItemLongClick(AdapterView<?> parent, View view, int position, long id) {
-                Log.i("MainActivity", "Item removed from list: " + position);
-                items.remove(position);
-                itemsAdapter.notifyDataSetChanged();
-                writeItems();
-                return true;
+            public void onItemClicked(int pos) {
+                // create the new activity
+                Intent i = new Intent(MainActivity.this, EditActivity.class);
+
+                // pass the data being edited
+                i.putExtra(KEY_ITEM_TEXT, items.get(pos));
+                i.putExtra(KEY_ITEM_POSITION, pos);
+
+                // display the activity
+                startActivityForResult(i, EDIT_TEXT_CODE);
+            }
+        };
+
+        ItemsAdapter.OnLongClickListener onLongClickListener = new ItemsAdapter.OnLongClickListener() {
+            @Override
+            public void onItemLongClicked(int pos) {
+                // Delete the item from the model
+                items.remove(pos);
+                // Notify the adapter
+                itemsAdapter.notifyItemRemoved(pos);
+                Toast.makeText(getApplicationContext(), "Item was removed", Toast.LENGTH_SHORT).show();
+                saveItems();
+            }
+        };
+
+        itemsAdapter = new ItemsAdapter(items, onClickListener, onLongClickListener);
+        rvItems.setAdapter(itemsAdapter);
+        rvItems.setLayoutManager(new LinearLayoutManager( this));
+
+        btnAdd.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                String todoItem = etItems.getText().toString();
+
+                // Add the Item to the model
+                items.add(todoItem);
+                // Notify adapter that an item is inserted
+                itemsAdapter.notifyItemInserted(items.size()-1);
+                etItems.setText("");
+                Toast.makeText(getApplicationContext(), "Item was added", Toast.LENGTH_SHORT).show();
+                saveItems();
             }
         });
-
-        // setup item listener for edit (regular click)
-        lvItems.setOnItemClickListener(new AdapterView.OnItemClickListener() {
-            @Override
-            public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
-                // Create the new activity
-                Intent i = new Intent(MainActivity.this, EditItemActivity.class);
-                // pass the data being editied
-                i.putExtra(ITEM_TEXT, items.get(position));
-                i.putExtra(ITEM_POSITION, position);
-                // display the the activity
-                startActivityForResult(i, EDIT_REQUEST_CODE);
-
-            }
-        });
     }
 
-    // handle results from edit activity
+    // handle the result of the edit activity
     @Override
     protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-        // if the edit activity completed ok
-        if (resultCode == RESULT_OK && requestCode == EDIT_REQUEST_CODE) {
-            // extract the updated item text from result intent extras
-            String updatedItem = data.getExtras().getString(ITEM_TEXT);
-            // extract the original position of edited item
-            int position = data.getExtras().getInt(ITEM_POSITION);
-            // update the model with the new item at the edited position
-            items.set(position, updatedItem);
-            // notify the adapter that the model changed
-            itemsAdapter.notifyDataSetChanged();
-            // persist the changed model
-            writeItems();
-            // notify the user the operation completed successfully
-            Toast.makeText(this, "Item updated successfully", Toast.LENGTH_SHORT).show();
+        if (resultCode == RESULT_OK && requestCode == EDIT_TEXT_CODE) {
+            // Retrieve the updated text value
+            String itemText = data.getStringExtra(KEY_ITEM_TEXT);
+            // Extract the original position of the edited item from the key position
+            int pos = data.getExtras().getInt(KEY_ITEM_POSITION);
 
+            // Update the model at the right position with new item text
+            items.set(pos, itemText);
+            // Notify the adaptor
+            itemsAdapter.notifyItemChanged(pos);
+            // Persist the changes
+            saveItems();
+            Toast.makeText(getApplicationContext(),"Item updated successfully", Toast.LENGTH_SHORT).show();
+        } else {
+            Log.w("MainActivity", "Unknown call to onActivityResult");
         }
     }
 
+    // get the file
     private File getDataFile() {
-        return new File(getFilesDir(), "todo.txt");
+        return new File(getFilesDir(), "data.txt");
     }
 
-    private void readItems() {
+    // This will load the items by reading every line of the data file
+    private void loadItems() {
         try {
             items = new ArrayList<>(FileUtils.readLines(getDataFile(), Charset.defaultCharset()));
         } catch (IOException e) {
-            Log.e("MainActivity", "Error reading file", e);
+            Log.e("MainActivity", "Error Reading the file", e);
             items = new ArrayList<>();
         }
     }
 
-    private void writeItems() {
+    // This function saves items by writing them into the data file
+    private void saveItems() {
         try {
             FileUtils.writeLines(getDataFile(), items);
         } catch (IOException e) {
-            Log.e("MainActivity", "Error writing file", e);
+            Log.e("MainActivity", "Error Writting to the file", e);
         }
-
     }
 }
